@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/govinda-attal/kiss-lib/pkg/core/status/codes"
 	"github.com/jinzhu/copier"
+
+	"github.com/govinda-attal/kiss-lib/pkg/core/status/codes"
 )
 
 // ErrInternal represents internal server error.
@@ -136,4 +137,8 @@ func (e ErrServiceStatus) Cause() error {
 
 type errCauser interface {
 	Cause() error
+}
+
+func (e ErrServiceStatus) Is(code codes.Code) bool {
+	return e.Code == code
 }
