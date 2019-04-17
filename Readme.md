@@ -10,7 +10,7 @@ If so then you may agree that functional concrete implementation don't need to h
 
 Would it be easy to simply write (and later read code) as below:
 
-```
+```go
 package valuable
 
 import (
@@ -30,7 +30,7 @@ func Operation() {
 
 If you like this, quick way to enable this is by importing a package to register/initialize default logger for logrus
 
-```
+```go
 package main
 
 import (
@@ -81,7 +81,7 @@ If there are any decorator's to applied to individual resource path handlers the
 ### Business Layer 
 Business layer devoid of HTTP translations would look like
 
-```
+```go
 // Greeter is the real interface that depicts business service contract.
 type Greeter interface {
 	// Hello returns a personalised greeting message for given argument.
@@ -104,7 +104,7 @@ func (s *srv) Hello(ctx context.Context, name string) (string, error) {
 
 ### HTTP Handler
 HTTP Handler will manage http translations, error handling is simplified too.
-```
+```go
 type restHandler struct {
 	g Greeter
 }
@@ -139,7 +139,7 @@ func (rh *restHandler) Error(w http.ResponseWriter, r *http.Request) error {
 With httputil, error handling is simplified along with function decorators per handler func.
 Negroni middlewares could be used that apply across mux or subrouter.
 
-```
+```go
 var rootCmd = &cobra.Command{
 	Use:   "restex",
 	Short: "Starts microservice",
@@ -191,4 +191,117 @@ func startServer(cmd *cobra.Command, args []string) {
 	srv.Shutdown(ctx)
 	os.Exit(0)
 }
+```
+
+### A Router pattern to route Kafka Messages on one or more topic(s)
+
+This pattern is inspired from frameworks like gorilla mux router but is intended for message processing on Kafka topics.
+
+Though, I have used Confluent Library, one can achieve similar pattern by just implementing driver interfaces in kiss-lib/pkg/kasync.
+
+The crux boils down to:
+```go
+	// A router can listen to many topics, hence routing groups
+	rg := r.NewRouteGrp("Greetings", h.DefaultHandler)
+	// For different messages (in different formats) that arrive on the same topic, you can specify custom handler
+	// By the way this step is optional if you want to have a default handler for a topic
+	rg.HandleMsg("Welcome", h.Welcome)
+	rg.HandleMsg("Farewell", h.Farewell)
+```
+
+A more detailed implementation is as below
+
+```go 
+func main() {
+
+	pCfg := &kafka.ConfigMap{"bootstrap.servers": "localhost"}
+	cCfg := &kafka.ConfigMap{
+		"bootstrap.servers":     "localhost",
+		"broker.address.family": "v4",
+		"group.id":              "group",
+		"session.timeout.ms":    6000,
+		"auto.offset.reset":     "earliest",
+	}
+
+	greeter := &Greeter{}
+	h := NewGreeterHandler(greeter)
+
+	// Get a new Kafka Router (here sample router is provided that uses confluent kafka go library)
+	// technically you could write a router with any library that implements interfaces within the driver package
+	// kiss-lib/pkg/kasync
+
+	r := conkaf.New(cCfg, pCfg, "errTopic")
+
+	// A router can listen to many topics, hence routing groups
+	rg := r.NewRouteGrp("Greetings", h.DefaultHandler)
+	// For different messages (in different formats) that arrive on the same topic, you can specify custom handler
+	// By the way this step is optional if you want to have a default handler for a topic
+	rg.HandleMsg("Welcome", h.Welcome)
+	rg.HandleMsg("Farewell", h.Farewell)
+
+	// For custom requirements you can have custom message name resolver
+	// It can be as simple as looking to kafka message header or looking into content of the message
+	customMsgNameResolver := func(msg interface{}) (string, error) {
+		if _, ok := msg.(*kafka.Message); !ok {
+			return kasync.MsgHdrValUnk, fmt.Errorf("invalid msg type := does the message type match the kafka library you are using")
+		}
+		for _, h := range msg.(*kafka.Message).Headers {
+			if h.Key == kasync.MsgHdrMsgName {
+				return string(h.Value), nil
+			}
+		}
+		return kasync.MsgHdrValUnk, nil
+	}
+	// Set this custom message name resolver at the routing group level or per topic level
+	rg.SetMsgNameResolver(customMsgNameResolver)
+
+	// follow same steps if the router needs to listen to same topic
+	// r.NewRouteGrp("AnotherTopic", h.DefaultHandler)
+
+	go func() {
+		// Router will now start consuming or listening to messages on topics
+		if err := r.Listen(); err != nil {
+			log.Fatalln(err)
+		}
+	}()
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	<-c
+	// safely close the router (active connections to multiple topics)
+	r.Close()
+
+	time.Sleep(5 * time.Second)
+}
+
+type Greeter struct{}
+
+func (g Greeter) Welcome(rq WelcomeRq) error {
+	log.Println("welcome pack sent to: ", rq.Name)
+	return nil
+}
+
+func (g Greeter) Farewell(rq FarewellRq) error {
+	log.Println("farewell wishes sent to: ", rq.Name)
+	return nil
+}
+
+func (gh *GreeterHandler) Welcome(ctx context.Context, data []byte) error {
+	var rq WelcomeRq
+	err := json.Unmarshal(data, &rq)
+	if err != nil {
+		return status.ErrBadRequest().WithError(err)
+	}
+	return gh.srv.Welcome(rq)
+}
+
+func (gh *GreeterHandler) Farewell(ctx context.Context, data []byte) error {
+	var rq FarewellRq
+	err := json.Unmarshal(data, &rq)
+	if err != nil {
+		return status.ErrBadRequest().WithError(err)
+	}
+	return gh.srv.Farewell(rq)
+}
+
 ```
