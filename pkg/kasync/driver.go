@@ -31,7 +31,7 @@ type Router interface {
 	io.Closer
 	Listen() error
 	NewRouteGrp(topic string, defHandler MsgHandler) RouteGroup
-	RouteGroup(topic, msgName string) (RouteGroup, error)
+	RouteGroup(topic string) (RouteGroup, error)
 	RqTopics() []string
 }
 
