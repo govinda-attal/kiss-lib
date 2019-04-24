@@ -63,7 +63,7 @@ func (rg *TopicRouteGroup) ResolveMsgName(msg interface{}) (string, error) {
 
 func (r *Router) NewRouteGrp(topic string, defHandler kasync.MsgHandler) kasync.RouteGroup {
 	rg := &TopicRouteGroup{topic: topic,
-		msgResolver: ResolveMsgName,
+		msgResolver: resolveMsgName,
 		defHandler:  defHandler,
 		handlers:    make(map[string]kasync.MsgHandler)}
 	r.routeGrps[topic] = rg
@@ -85,7 +85,6 @@ func (r *Router) Listen() error {
 		panic(err)
 	}
 	defer c.Close()
-
 	err = c.SubscribeTopics(r.RqTopics(), nil)
 	if err != nil {
 		panic(err)
@@ -106,10 +105,15 @@ loop:
 			}
 			switch e := ev.(type) {
 			case *kafka.Message:
-				log.Println("Message received on topic (", *e.TopicPartition.Topic, ")\nkey:", string(e.Key), "\nmsg:", string(e.Value))
+				log.Println("Message received on topic (",
+					*e.TopicPartition.Topic, ")\nkey:",
+					string(e.Key), "\nmsg:",
+					string(e.Value))
+
 				r.callHandler(e)
 			case *kafka.OffsetsCommitted:
 				log.Println("Offset committed: ", e)
+
 			default:
 				log.Println("Unknown event ", ev)
 			}
@@ -215,6 +219,6 @@ func headerByKey(hdrs []kafka.Header, key string) kasync.MsgType {
 	return kasync.MsgHdrValUnk
 }
 
-func ResolveMsgName(msg interface{}) (string, error) {
+func resolveMsgName(msg interface{}) (string, error) {
 	return headerByKey(msg.(*kafka.Message).Headers, kasync.MsgHdrMsgName), nil
 }
